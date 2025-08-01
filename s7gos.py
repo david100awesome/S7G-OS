@@ -21,6 +21,9 @@ games_menu = [
     "Snake",
     "Pong",
     "Dice Roller",
+    "Falling Blocks",
+    "Blackjack",
+    "Texas Hold'em",
     "Back"
 ]
 
@@ -245,6 +248,435 @@ def flappy_bird():
     g.show()
     sys.wait_for_key()
 
+SUITS = ['♠', '♥', '♦', '♣']
+RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+RANK_VALUES = {r: i for i, r in enumerate(RANKS, start=2)}
+
+def create_deck():
+    return [(rank, suit) for suit in SUITS for rank in RANKS]
+
+def card_str(card):
+    return f"{card[0]}{card[1]}"
+
+def hand_to_str(hand):
+    return ' '.join(card_str(c) for c in hand)
+
+# Poker hand evaluation (same as before, omitted here for brevity)
+# Copy the get_hand_rank() and compare_hands() functions from previous message here
+
+# Betting options for player UI
+BETTING_OPTIONS = ["Check", "Bet", "Call", "Fold"]
+
+def get_player_action(can_check, can_call):
+    selected = 0
+    while True:
+        g.clear()
+        g.draw_text(10, 10, "Choose action:")
+        for i, option in enumerate(BETTING_OPTIONS):
+            # Disable options not valid for current state
+            valid = True
+            if option == "Check" and not can_check:
+                valid = False
+            if option == "Call" and not can_call:
+                valid = False
+            color = g.WHITE if i != selected else g.BLUE
+            if not valid:
+                color = g.GRAY
+            g.set_color(color)
+            g.draw_text(10, 40 + i * 20, option)
+        g.show()
+
+        key = sys.wait_for_key()
+        if key == "up":
+            selected = (selected - 1) % len(BETTING_OPTIONS)
+        elif key == "down":
+            selected = (selected + 1) % len(BETTING_OPTIONS)
+        elif key == "enter":
+            choice = BETTING_OPTIONS[selected]
+            if (choice == "Check" and can_check) or (choice == "Call" and can_call) or choice in ("Bet", "Fold"):
+                return choice
+        elif key == "esc":
+            return "Fold"
+
+def ai_decision(ai_hand, community, pot, current_bet, ai_chips, player_bet):
+    # Very simple AI logic with bluff chance
+    bluff_chance = 0.1
+    hand_strength = evaluate_hand_strength(ai_hand + community)
+    # hand_strength: 0-1 scale (1 best)
+    if random.random() < bluff_chance:
+        # Bluff: raise if chips allow
+        if ai_chips > current_bet:
+            return "Bet"
+    if hand_strength > 0.7:
+        if current_bet > 0:
+            return "Call"
+        else:
+            return "Bet"
+    elif hand_strength > 0.4:
+        if current_bet > 0:
+            return "Call"
+        else:
+            return "Check"
+    else:
+        if current_bet > 0:
+            return "Fold"
+        else:
+            return "Check"
+
+def evaluate_hand_strength(cards):
+    # Simplified hand strength evaluator: 0 (worst) to 1 (best)
+    rank, vals = get_hand_rank(cards)
+    return rank / 9.0  # max rank = 9 (royal flush)
+
+def texas_holdem_betting():
+    # Setup
+    player_chips = 100
+    ai_chips = 100
+    big_blind = 10
+
+    while player_chips > 0 and ai_chips > 0:
+        # Initialize deck and hands
+        deck = create_deck()
+        random.shuffle(deck)
+        pot = 0
+        current_bet = 0
+
+        player_hand = [deck.pop(), deck.pop()]
+        ai_hand = [deck.pop(), deck.pop()]
+
+        burn = deck.pop()
+        flop = [deck.pop(), deck.pop(), deck.pop()]
+        burn = deck.pop()
+        turn = [deck.pop()]
+        burn = deck.pop()
+        river = [deck.pop()]
+        community = []
+
+        # Posting blinds (simplified: player posts small blind, AI posts big blind)
+        player_chips -= big_blind // 2
+        ai_chips -= big_blind
+        pot += big_blind + (big_blind // 2)
+        current_bet = big_blind
+
+        # Show hole cards
+        show_cards = True
+
+        def display_state(stage):
+            g.clear()
+            g.draw_text(10, 10, f"Chips: You={player_chips} AI={ai_chips} Pot={pot}")
+            g.draw_text(10, 30, "Your Hand:")
+            g.draw_text(10, 50, hand_to_str(player_hand))
+            g.draw_text(10, 70, f"Community Cards: {hand_to_str(community)}")
+            g.draw_text(10, 100, f"Stage: {stage}")
+            g.show()
+
+        # Pre-flop betting round
+        community = []
+        display_state("Pre-Flop")
+        # Player action
+        action = get_player_action(can_check=False, can_call=False)  # can't check or call pre-flop
+        if action == "Fold":
+            g.clear()
+            g.draw_text(50, 100, "You folded. AI wins the pot.")
+            g.show()
+            ai_chips += pot
+            sys.wait_for_key()
+            continue
+        elif action == "Bet":
+            bet_amount = big_blind  # fixed bet size for simplicity
+            player_chips -= bet_amount
+            pot += bet_amount
+            current_bet = bet_amount
+            # AI responds
+            ai_act = ai_decision(ai_hand, community, pot, current_bet, ai_chips, bet_amount)
+            if ai_act == "Fold":
+                g.clear()
+                g.draw_text(50, 100, "AI folded. You win the pot!")
+                g.show()
+                player_chips += pot
+                sys.wait_for_key()
+                continue
+            elif ai_act == "Call":
+                ai_chips -= bet_amount
+                pot += bet_amount
+            elif ai_act == "Bet":
+                # AI raises (not implemented fully, just call for now)
+                ai_chips -= bet_amount
+                pot += bet_amount
+        elif action == "Check":
+            pass
+
+        # Flop
+        community = flop
+        display_state("Flop")
+        sys.wait_for_key()
+
+        # Player action post-flop (can check or call)
+        action = get_player_action(can_check=True, can_call=(current_bet>0))
+        if action == "Fold":
+            g.clear()
+            g.draw_text(50, 100, "You folded. AI wins the pot.")
+            g.show()
+            ai_chips += pot
+            sys.wait_for_key()
+            continue
+        elif action == "Bet":
+            bet_amount = big_blind
+            player_chips -= bet_amount
+            pot += bet_amount
+            current_bet = bet_amount
+        elif action == "Call":
+            call_amount = current_bet
+            player_chips -= call_amount
+            pot += call_amount
+        elif action == "Check":
+            pass
+
+        # AI action post-flop (simplified)
+        ai_act = ai_decision(ai_hand, community, pot, current_bet, ai_chips, 0)
+        if ai_act == "Fold":
+            g.clear()
+            g.draw_text(50, 100, "AI folded. You win the pot!")
+            g.show()
+            player_chips += pot
+            sys.wait_for_key()
+            continue
+        elif ai_act == "Bet":
+            bet_amount = big_blind
+            ai_chips -= bet_amount
+            pot += bet_amount
+            current_bet = bet_amount
+        elif ai_act == "Call":
+            ai_chips -= current_bet
+            pot += current_bet
+        elif ai_act == "Check":
+            pass
+
+        # Turn
+        community = flop + turn
+        display_state("Turn")
+        sys.wait_for_key()
+
+        # River
+        community = flop + turn + river
+        display_state("River")
+        sys.wait_for_key()
+
+        # Showdown
+        g.clear()
+        g.draw_text(10, 10, "Showdown!")
+        g.draw_text(10, 30, f"Your Hand: {hand_to_str(player_hand)}")
+        g.draw_text(10, 50, f"Dealer Hand: {hand_to_str(ai_hand)}")
+        g.draw_text(10, 70, f"Community Cards: {hand_to_str(community)}")
+        g.show()
+        time.sleep(2)
+
+        winner = compare_hands(player_hand + community, ai_hand + community)
+
+        if winner == 1:
+            g.draw_text(50, 100, "You win the pot!")
+            player_chips += pot
+        elif winner == 2:
+            g.draw_text(50, 100, "AI wins the pot!")
+            ai_chips += pot
+        else:
+            g.draw_text(50, 100, "It's a tie! Pot is split.")
+            player_chips += pot // 2
+            ai_chips += pot // 2
+        g.show()
+        sys.wait_for_key()
+
+    g.clear()
+    if player_chips <= 0:
+        g.draw_text(50, 100, "You ran out of chips. Game Over!")
+    else:
+        g.draw_text(50, 100, "AI ran out of chips. You Win!")
+    g.show()
+    sys.wait_for_key()
+
+def get_hand_rank(cards):
+    """Evaluate best 5-card poker hand rank from 7 cards"""
+    # cards = list of (rank, suit)
+    from collections import Counter
+    ranks = [c[0] for c in cards]
+    suits = [c[1] for c in cards]
+    rank_vals = sorted([RANK_VALUES[r] for r in ranks], reverse=True)
+    counts = Counter(ranks)
+    counts_sorted = sorted(counts.values(), reverse=True)
+    flush = any(suits.count(s) >= 5 for s in suits)
+    # Straight check helper
+    def is_straight(vals):
+        vals = sorted(set(vals), reverse=True)
+        for i in range(len(vals) - 4):
+            window = vals[i:i+5]
+            if window[0] - window[4] == 4:
+                return window[0]
+        # Special case: A-2-3-4-5 straight
+        if set([14, 2, 3, 4, 5]).issubset(vals):
+            return 5
+        return None
+
+    # Convert ranks to numeric values for straight detection, Ace high=14
+    numeric_ranks = [RANK_VALUES[r] for r in ranks]
+    numeric_ranks = [14 if r == 14 else r for r in numeric_ranks]  # Ace high
+
+    straight_high = is_straight(numeric_ranks)
+
+    # Check flush suits and get flush cards if flush exists
+    flush_suit = None
+    flush_cards = []
+    for s in SUITS:
+        if suits.count(s) >= 5:
+            flush_suit = s
+            flush_cards = [RANK_VALUES[c[0]] for c in cards if c[1] == s]
+            flush_cards.sort(reverse=True)
+            break
+
+    # Check straight flush
+    if flush_suit and flush_cards:
+        sf_high = is_straight(flush_cards)
+        if sf_high:
+            if sf_high == 14:
+                return (9, [sf_high])  # Royal flush (straight flush ace-high)
+            else:
+                return (8, [sf_high])  # Straight flush
+
+    # Four of a kind
+    if counts_sorted[0] == 4:
+        quad_rank = [RANK_VALUES[r] for r, c in counts.items() if c == 4][0]
+        kickers = sorted([RANK_VALUES[r] for r, c in counts.items() if c != 4], reverse=True)
+        return (7, [quad_rank] + kickers)
+
+    # Full house
+    if counts_sorted[0] == 3 and counts_sorted[1] >= 2:
+        triple_rank = max([RANK_VALUES[r] for r, c in counts.items() if c == 3])
+        pair_rank = max([RANK_VALUES[r] for r, c in counts.items() if c >= 2 and RANK_VALUES[r] != triple_rank])
+        return (6, [triple_rank, pair_rank])
+
+    # Flush
+    if flush_suit:
+        top5 = flush_cards[:5]
+        return (5, top5)
+
+    # Straight
+    if straight_high:
+        return (4, [straight_high])
+
+    # Three of a kind
+    if counts_sorted[0] == 3:
+        triple_rank = [RANK_VALUES[r] for r, c in counts.items() if c == 3][0]
+        kickers = sorted([RANK_VALUES[r] for r, c in counts.items() if c != 3], reverse=True)[:2]
+        return (3, [triple_rank] + kickers)
+
+    # Two pair
+    pairs = sorted([RANK_VALUES[r] for r, c in counts.items() if c == 2], reverse=True)
+    if len(pairs) >= 2:
+        kickers = sorted([RANK_VALUES[r] for r, c in counts.items() if c == 1], reverse=True)
+        return (2, pairs[:2] + kickers[:1])
+
+    # One pair
+    if counts_sorted[0] == 2:
+        pair_rank = [RANK_VALUES[r] for r, c in counts.items() if c == 2][0]
+        kickers = sorted([RANK_VALUES[r] for r, c in counts.items() if c == 1], reverse=True)[:3]
+        return (1, [pair_rank] + kickers)
+
+    # High card
+    high_cards = sorted([RANK_VALUES[r] for r in ranks], reverse=True)[:5]
+    return (0, high_cards)
+
+def compare_hands(hand1, hand2):
+    """Return 1 if hand1 wins, 2 if hand2 wins, 0 if tie"""
+    rank1, vals1 = get_hand_rank(hand1)
+    rank2, vals2 = get_hand_rank(hand2)
+    if rank1 > rank2:
+        return 1
+    elif rank2 > rank1:
+        return 2
+    else:
+        # Compare kicker values
+        for v1, v2 in zip(vals1, vals2):
+            if v1 > v2:
+                return 1
+            elif v2 > v1:
+                return 2
+        return 0
+
+def blackjack():
+    def draw_card():
+        value = random.choice(["A"] + [str(n) for n in range(2, 11)] + ["J", "Q", "K"])
+        return value
+
+    def card_value(card):
+        if card in ["J", "Q", "K"]:
+            return 10
+        elif card == "A":
+            return 11
+        else:
+            return int(card)
+
+    def hand_total(hand):
+        total = sum(card_value(c) for c in hand)
+        # Handle aces
+        aces = hand.count("A")
+        while total > 21 and aces:
+            total -= 10
+            aces -= 1
+        return total
+
+    # Deal hands
+    player = [draw_card(), draw_card()]
+    dealer = [draw_card(), draw_card()]
+
+    while True:
+        g.clear()
+        g.draw_text(10, 10, f"Your Hand: {' '.join(player)}")
+        g.draw_text(10, 30, f"Dealer: {dealer[0]} ?")
+        g.draw_text(10, 60, f"Total: {hand_total(player)}")
+        g.draw_text(10, 90, "← Hit    → Stand")
+        g.show()
+
+        if hand_total(player) > 21:
+            break
+
+        key = ""
+        while not key:
+            if sys.keydown("left"):
+                key = "hit"
+            elif sys.keydown("right"):
+                key = "stand"
+            time.sleep(0.05)
+
+        if key == "hit":
+            player.append(draw_card())
+        else:
+            break
+
+    # Dealer plays
+    while hand_total(dealer) < 17:
+        dealer.append(draw_card())
+
+    # Final result
+    g.clear()
+    g.draw_text(10, 10, f"Your Hand: {' '.join(player)} = {hand_total(player)}")
+    g.draw_text(10, 40, f"Dealer: {' '.join(dealer)} = {hand_total(dealer)}")
+
+    player_total = hand_total(player)
+    dealer_total = hand_total(dealer)
+
+    if player_total > 21:
+        result = "You bust!"
+    elif dealer_total > 21 or player_total > dealer_total:
+        result = "You win!"
+    elif player_total == dealer_total:
+        result = "Push!"
+    else:
+        result = "You lose!"
+
+    g.draw_text(10, 80, result)
+    g.show()
+    sys.wait_for_key()
+
+
 # --- Game 2: Number Guess ---
 def number_guess():
     g.clear()
@@ -284,6 +716,44 @@ def reaction_test():
     g.clear()
     g.set_color(WHITE)
     g.draw_text(40, 100, f"Reaction: {int(reaction)} ms")
+    g.show()
+    sys.wait_for_key()
+
+def falling_blocks():
+    player_x = SCREEN_W // 2
+    block_x = random.randint(0, SCREEN_W - 10)
+    block_y = 0
+    speed = 5
+    score = 0
+
+    while True:
+        g.clear()
+        g.set_color(g.BLUE)
+        g.fill_rect(player_x, SCREEN_H - 10, 20, 10)  # player
+        g.set_color(g.RED)
+        g.fill_rect(block_x, block_y, 10, 10)  # falling block
+        g.draw_text(10, 10, f"Score: {score}")
+        g.show()
+        time.sleep(0.05)
+
+        block_y += speed
+        if sys.keydown("left"): player_x -= 5
+        if sys.keydown("right"): player_x += 5
+        player_x = max(0, min(SCREEN_W - 20, player_x))
+
+        # Collision
+        if (SCREEN_H - 10 < block_y + 10 and
+            player_x < block_x + 10 and
+            player_x + 20 > block_x):
+            break
+
+        if block_y > SCREEN_H:
+            block_y = 0
+            block_x = random.randint(0, SCREEN_W - 10)
+            score += 1
+
+    g.clear()
+    g.draw_text(90, 100, f"Game Over! Score: {score}")
     g.show()
     sys.wait_for_key()
 
@@ -336,9 +806,24 @@ def main():
                 elif cursor == 5:
                     dice_roller()
                 elif cursor == 6:
+                    falling_blocks()
+                elif cursor == 7:
+                    blackjack()
+                elif cursor == 8:
+                    texas_holdem_betting()
+                elif cursor == 9:
                     screen = "main"; cursor = 0
         elif key == "esc":
             screen = "main"
             cursor = 0
 
+def boot_screen():
+    g.set_background(g.GRAY)
+    g.clear()
+    g.set_color(g.WHITE)
+    g.draw_text(100, 100, "s7g OS is booting...")
+    g.show()
+    time.sleep(2)
+
+boot_screen()
 main()
